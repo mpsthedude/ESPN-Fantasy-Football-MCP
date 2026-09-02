@@ -1,0 +1,322 @@
+{
+  "version": 1,
+  "tool_count": 37,
+  "league_id": 123456789,
+  "team_id": 1,
+  "year": 2026,
+  "created_at": "2026-08-15T17:25:26.209381+00:00",
+  "environment": {
+    "python": "3.12.13",
+    "platform": "win32"
+  },
+  "tools": {
+    "get_league_info": {
+      "class": "A",
+      "baseline_p50_seconds": 0.0028,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 1.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 331,
+      "quota_delta": 0
+    },
+    "get_team_roster": {
+      "class": "A",
+      "baseline_p50_seconds": 0.0044,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 1.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 34637,
+      "quota_delta": 0
+    },
+    "get_team_info": {
+      "class": "A",
+      "baseline_p50_seconds": 0.0035,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 1.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 1978,
+      "quota_delta": 0
+    },
+    "get_player_stats": {
+      "class": "A",
+      "baseline_p50_seconds": 0.0032,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 1.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 1654,
+      "quota_delta": 0
+    },
+    "get_league_standings": {
+      "class": "A",
+      "baseline_p50_seconds": 0.0039,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 1.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 26884,
+      "quota_delta": 0
+    },
+    "get_matchup_info": {
+      "class": "A",
+      "baseline_p50_seconds": 0.002,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 1.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 45,
+      "quota_delta": 0
+    },
+    "get_league_settings": {
+      "class": "A",
+      "baseline_p50_seconds": 0.002,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 1.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 4408,
+      "quota_delta": 0
+    },
+    "get_draft_results": {
+      "class": "A",
+      "baseline_p50_seconds": 0.0024,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 1.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 145,
+      "quota_delta": 0
+    },
+    "get_all_rosters": {
+      "class": "A",
+      "baseline_p50_seconds": 0.0031,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 1.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 426453,
+      "quota_delta": 0
+    },
+    "get_free_agents": {
+      "class": "B",
+      "baseline_p50_seconds": 0.406,
+      "warning_p50_seconds": 2.0,
+      "hard_p50_seconds": 4.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 8312,
+      "quota_delta": 0
+    },
+    "get_league_snapshot": {
+      "class": "B",
+      "baseline_p50_seconds": 0.357,
+      "warning_p50_seconds": 2.0,
+      "hard_p50_seconds": 4.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 26137,
+      "quota_delta": 0
+    },
+    "enrich_espn_free_agents": {
+      "class": "B",
+      "baseline_p50_seconds": 1.9802,
+      "warning_p50_seconds": 3.5,
+      "hard_p50_seconds": 5.0,
+      "max_original_fp_reads": 157,
+      "response_bytes": 7980,
+      "quota_delta": 0
+    },
+    "get_player_intelligence": {
+      "class": "C",
+      "baseline_p50_seconds": 0.0727,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 2.0,
+      "max_original_fp_reads": 7,
+      "response_bytes": 699,
+      "quota_delta": 0
+    },
+    "get_consensus_rankings": {
+      "class": "C",
+      "baseline_p50_seconds": 0.0044,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 2.0,
+      "max_original_fp_reads": 1,
+      "response_bytes": 8791,
+      "quota_delta": 0
+    },
+    "get_adp": {
+      "class": "C",
+      "baseline_p50_seconds": 0.0335,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 2.0,
+      "max_original_fp_reads": 1,
+      "response_bytes": 1816,
+      "quota_delta": 0
+    },
+    "compare_players": {
+      "class": "C",
+      "baseline_p50_seconds": 0.1455,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 2.0,
+      "max_original_fp_reads": 14,
+      "response_bytes": 1668,
+      "quota_delta": 0
+    },
+    "rank_waiver_targets": {
+      "class": "D",
+      "baseline_p50_seconds": 0.5495,
+      "warning_p50_seconds": 2.5,
+      "hard_p50_seconds": 4.0,
+      "max_original_fp_reads": 13,
+      "response_bytes": 40597,
+      "quota_delta": 0
+    },
+    "analyze_my_team": {
+      "class": "D",
+      "baseline_p50_seconds": 0.1328,
+      "warning_p50_seconds": 1.5,
+      "hard_p50_seconds": 3.0,
+      "max_original_fp_reads": 13,
+      "response_bytes": 27326,
+      "quota_delta": 0
+    },
+    "evaluate_trade": {
+      "class": "D",
+      "baseline_p50_seconds": 0.1596,
+      "warning_p50_seconds": 1.5,
+      "hard_p50_seconds": 3.0,
+      "max_original_fp_reads": 13,
+      "response_bytes": 14078,
+      "quota_delta": 0
+    },
+    "find_trade_targets": {
+      "class": "D",
+      "baseline_p50_seconds": 0.3673,
+      "warning_p50_seconds": 2.5,
+      "hard_p50_seconds": 4.0,
+      "max_original_fp_reads": 13,
+      "response_bytes": 100003,
+      "quota_delta": 0
+    },
+    "optimize_lineup": {
+      "class": "D",
+      "baseline_p50_seconds": 0.8793,
+      "warning_p50_seconds": 2.5,
+      "hard_p50_seconds": 4.0,
+      "max_original_fp_reads": 111,
+      "response_bytes": 7943,
+      "quota_delta": 0
+    },
+    "get_fantasy_brief": {
+      "class": "E",
+      "baseline_p50_seconds": 0.9825,
+      "warning_p50_seconds": 5.0,
+      "hard_p50_seconds": 8.0,
+      "max_original_fp_reads": 13,
+      "response_bytes": 40671,
+      "quota_delta": 0
+    },
+    "list_my_leagues": {
+      "class": "B",
+      "baseline_p50_seconds": 0.0017,
+      "warning_p50_seconds": 2.0,
+      "hard_p50_seconds": 4.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 1341,
+      "quota_delta": 0
+    },
+    "get_league_context": {
+      "class": "A",
+      "baseline_p50_seconds": 0.0016,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 1.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 403,
+      "quota_delta": 0
+    },
+    "get_commissioner_context": {
+      "class": "A",
+      "baseline_p50_seconds": 0.0016,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 1.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 919,
+      "quota_delta": 0
+    },
+    "commissioner_audit_lineups": {
+      "class": "A",
+      "baseline_p50_seconds": 0.0016,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 1.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 1614,
+      "quota_delta": 0
+    },
+    "commissioner_audit_rosters": {
+      "class": "A",
+      "baseline_p50_seconds": 0.0019,
+      "warning_p50_seconds": 1.0,
+      "hard_p50_seconds": 1.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 3451,
+      "quota_delta": 0
+    },
+    "commissioner_audit_transactions": {
+      "class": "B",
+      "baseline_p50_seconds": 0.0989,
+      "warning_p50_seconds": 2.0,
+      "hard_p50_seconds": 4.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 1362,
+      "quota_delta": 0
+    },
+    "commissioner_investigate": {
+      "class": "B",
+      "baseline_p50_seconds": 0.1015,
+      "warning_p50_seconds": 2.0,
+      "hard_p50_seconds": 4.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 3034,
+      "quota_delta": 0
+    },
+    "get_commissioner_brief": {
+      "class": "B",
+      "baseline_p50_seconds": 0.1216,
+      "warning_p50_seconds": 2.0,
+      "hard_p50_seconds": 4.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 1398,
+      "quota_delta": 0
+    },
+    "get_draft_board": {
+      "class": "B",
+      "baseline_p50_seconds": 1.1037,
+      "warning_p50_seconds": 2.0,
+      "hard_p50_seconds": 4.0,
+      "max_original_fp_reads": 25,
+      "response_bytes": 30597,
+      "quota_delta": 0
+    },
+    "prepare_draft_strategy": {
+      "class": "E",
+      "baseline_p50_seconds": 1.0745,
+      "warning_p50_seconds": 5.0,
+      "hard_p50_seconds": 8.0,
+      "max_original_fp_reads": 38,
+      "response_bytes": 99558,
+      "quota_delta": 0
+    },
+    "analyze_draft_pick": {
+      "class": "B",
+      "baseline_p50_seconds": 1.77,
+      "warning_p50_seconds": 3.0,
+      "hard_p50_seconds": 6.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 10505,
+      "quota_delta": 0
+    },
+    "get_live_draft_brief": {
+      "class": "B",
+      "baseline_p50_seconds": 1.32,
+      "warning_p50_seconds": 3.0,
+      "hard_p50_seconds": 6.0,
+      "max_original_fp_reads": 0,
+      "response_bytes": 6312,
+      "quota_delta": 0
+    }
+  },
+  "scope": "espn_fantasy_server ESPN/FantasyPros core registry",
+  "scope_note": "This is intentionally a 37-tool core baseline. Unified wrapper tools are covered by tests/test_unified_mcp.py and packaging CI. Regenerate this file only from an explicit performance calibration run."
+}

@@ -1,0 +1,274 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # No repository secrets are required anywhere in this workflow. These are
+  # explicitly blanked so no test can accidentally pick up a real credential
+  # from the runner or ambient environment.
+  ESPN_S2: ""
+  ESPN_SWID: ""
+  SWID: ""
+  FANTASYPROS_API_KEY: ""
+  SPORTSGAMEODDS_API_KEY: ""
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv + Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Sync locked development environment
+        env:
+          FANTASY_FOOTBALL_MCP_HOME: ${{ runner.temp }}/ffm-home
+        run: uv sync --locked
+
+      - name: Run full unit test suite
+        env:
+          FANTASY_FOOTBALL_MCP_HOME: ${{ runner.temp }}/ffm-home
+        run: uv run python -m unittest discover
+
+  fresh-resolution:
+    name: fresh dependency resolution (mcp<2 contract gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv + Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+
+      - name: Create isolated venv (independent of repo .venv)
+        run: uv venv ${{ runner.temp }}/ffm-fresh-env --python 3.12
+
+      - name: Install project from pyproject.toml metadata only (bypasses uv.lock)
+        run: uv pip install --python ${{ runner.temp }}/ffm-fresh-env/bin/python -e .
+
+      - name: Assert mcp major version stays 1 (range contract, not an exact pin)
+        env:
+          FANTASY_FOOTBALL_MCP_HOME: ${{ runner.temp }}/ffm-home
+        run: |
+          ${{ runner.temp }}/ffm-fresh-env/bin/python -c "
+          import importlib.metadata as m
+          v = m.version('mcp')
+          major = int(v.split('.')[0])
+          assert major == 1, f'mcp resolved to {v}, contract requires <2'
+          print('mcp fresh-resolved version:', v, '(major == 1, OK)')
+          "
+
+      - name: Run full unit test suite under freshly-resolved dependencies
+        env:
+          FANTASY_FOOTBALL_MCP_HOME: ${{ runner.temp }}/ffm-home
+        run: ${{ runner.temp }}/ffm-fresh-env/bin/python -m unittest discover
+
+  package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs:
+      - test
+      - fresh-resolution
+    timeout-minutes: 10
+    strategy:
+      fail-fast: true
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv + Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+
+      - name: "Step A: build wheel to temp dir (outside repo, not uploaded)"
+        shell: uv run --no-project python {0}
+        env:
+          FANTASY_FOOTBALL_MCP_HOME: ${{ runner.temp }}/ffm-home
+        run: |
+          import subprocess, os
+          from pathlib import Path
+          workspace = Path(os.environ["GITHUB_WORKSPACE"])
+          dist_dir = Path(os.environ["RUNNER_TEMP"]) / "ffm-dist"
+          dist_dir.mkdir(parents=True, exist_ok=True)
+          r = subprocess.run(["uv", "build", "--wheel", "--out-dir", str(dist_dir)], cwd=str(workspace))
+          assert r.returncode == 0, "wheel build failed"
+          print("wheel build OK ->", dist_dir)
+
+      - name: "Step B: wheel content audit"
+        shell: uv run --no-project python {0}
+        env:
+          FANTASY_FOOTBALL_MCP_HOME: ${{ runner.temp }}/ffm-home
+        run: |
+          import zipfile, os
+          from pathlib import Path
+          dist_dir = Path(os.environ["RUNNER_TEMP"]) / "ffm-dist"
+          wheels = list(dist_dir.glob("*.whl"))
+          assert len(wheels) == 1, f"expected exactly one wheel, found {len(wheels)}: {wheels}"
+          whl = wheels[0]
+          names = zipfile.ZipFile(whl).namelist()
+          required = {
+              "fantasy_football_server.py", "espn_fantasy_server.py", "espn_league_discovery.py",
+              "espn_transport.py", "espn_reference.py", "espn_session.py", "espn_league_read.py", "espn_roster_read.py", "espn_matchup_read.py",
+              "espn_free_agent_read.py", "espn_historical_lineup_read.py", "espn_draft_read.py", "espn_snapshot_read.py", "app_config.py", "fantasypros_client.py", "fantasy_models.py", "espn_adapter.py",
+              "league_registry.py", "commissioner_config.py", "draft_strategy_store.py",
+              "sportsgameodds_client.py", "sportsgameodds_analysis.py", "sportsgameodds_comparison.py", "sportsgameodds_disagreement.py", "sportsgameodds_disagreement_tools.py", "sportsgameodds_tools.py",
+              "player_market_context.py", "player_market_context_tools.py",
+          }
+          missing = required - set(names)
+          assert not missing, f"wheel missing required modules: {missing}"
+          forbidden = [
+              "performance_regression", "performance_baseline", "tests/", "CLAUDE.md",
+              "yahoo_client", "yahoo_oauth_bootstrap", "test_yahoo_client", ".fp_cache",
+              "fp_cache/", "league_registry.json", "commissioner_config.json", ".draft_strategy",
+              "draft_strategy/", "local_config/", "credentials.json", "sportsgameodds_server.py",
+          ]
+          leaked = [n for n in names for f in forbidden if f in n]
+          assert not leaked, f"wheel contains forbidden content: {leaked}"
+          print("wheel content audit OK:", whl.name, "-", len(names), "entries,", len(required), "required present")
+
+      - name: "Step C: install wheel into a clean environment"
+        shell: uv run --no-project python {0}
+        env:
+          FANTASY_FOOTBALL_MCP_HOME: ${{ runner.temp }}/ffm-home
+        run: |
+          import subprocess, os
+          from pathlib import Path
+          dist_dir = Path(os.environ["RUNNER_TEMP"]) / "ffm-dist"
+          clean_venv = Path(os.environ["RUNNER_TEMP"]) / "ffm-cleanenv"
+          whl = next(dist_dir.glob("*.whl"))
+          r = subprocess.run(["uv", "venv", str(clean_venv), "--python", "3.12"])
+          assert r.returncode == 0, "clean venv creation failed"
+          py = clean_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+          r = subprocess.run(["uv", "pip", "install", "--python", str(py), str(whl)])
+          assert r.returncode == 0, "clean wheel install failed"
+          print("clean venv install OK ->", py)
+
+      - name: "Step D: installed import contract"
+        shell: uv run --no-project python {0}
+        env:
+          FANTASY_FOOTBALL_MCP_HOME: ${{ runner.temp }}/ffm-home
+        run: |
+          import subprocess, os
+          from pathlib import Path
+          clean_venv = Path(os.environ["RUNNER_TEMP"]) / "ffm-cleanenv"
+          outside_cwd = Path(os.environ["RUNNER_TEMP"]) / "ffm-outside"
+          outside_cwd.mkdir(parents=True, exist_ok=True)
+          py = clean_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+          mods = [
+              "fantasy_football_server", "espn_fantasy_server", "espn_league_discovery",
+              "espn_transport", "espn_reference", "espn_session", "espn_league_read", "espn_roster_read", "espn_matchup_read", "espn_free_agent_read", "espn_historical_lineup_read", "espn_draft_read", "espn_snapshot_read",
+              "app_config", "fantasypros_client", "fantasy_models", "espn_adapter",
+              "league_registry", "commissioner_config", "draft_strategy_store",
+              "sportsgameodds_client", "sportsgameodds_analysis", "sportsgameodds_comparison", "sportsgameodds_disagreement", "sportsgameodds_disagreement_tools", "sportsgameodds_tools",
+              "player_market_context", "player_market_context_tools",
+          ]
+          code = (
+              "import sys\n"
+              f"mods = {mods!r}\n"
+              "for m in mods:\n"
+              "    __import__(m)\n"
+              "for m in mods:\n"
+              "    p = str(sys.modules[m].__file__)\n"
+              "    assert 'site-packages' in p, f'{m} did not resolve from site-packages: {p}'\n"
+              "print('IMPORTS_OK')\n"
+          )
+          r = subprocess.run([str(py), "-c", code], cwd=str(outside_cwd), capture_output=True, text=True)
+          assert r.returncode == 0 and "IMPORTS_OK" in r.stdout, f"installed import contract failed:\n{r.stdout}\n{r.stderr}"
+          print("installed import contract OK - all production modules resolve from site-packages")
+
+      - name: "Step E: mcp major-version gate on installed wheel"
+        shell: uv run --no-project python {0}
+        env:
+          FANTASY_FOOTBALL_MCP_HOME: ${{ runner.temp }}/ffm-home
+        run: |
+          import subprocess, os
+          from pathlib import Path
+          clean_venv = Path(os.environ["RUNNER_TEMP"]) / "ffm-cleanenv"
+          py = clean_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+          code = (
+              "import importlib.metadata as m\n"
+              "v = m.version('mcp')\n"
+              "major = int(v.split('.')[0])\n"
+              "assert major == 1, f'mcp resolved to {v}, contract requires <2'\n"
+              "print('MCP_GATE_OK', v)\n"
+          )
+          r = subprocess.run([str(py), "-c", code], capture_output=True, text=True)
+          assert r.returncode == 0, f"mcp gate failed:\n{r.stdout}\n{r.stderr}"
+          print(r.stdout.strip())
+
+      - name: "Step E2: retired espn-api dependency stays absent"
+        shell: uv run --no-project python {0}
+        env:
+          FANTASY_FOOTBALL_MCP_HOME: ${{ runner.temp }}/ffm-home
+        run: |
+          import subprocess, os
+          from pathlib import Path
+          clean_venv = Path(os.environ["RUNNER_TEMP"]) / "ffm-cleanenv"
+          py = clean_venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+          code = "import importlib.util; assert importlib.util.find_spec('espn_api') is None; print('ESPN_API_ABSENT_OK')"
+          r = subprocess.run([str(py), "-c", code], capture_output=True, text=True)
+          assert r.returncode == 0 and "ESPN_API_ABSENT_OK" in r.stdout, f"retired dependency unexpectedly present:\n{r.stdout}\n{r.stderr}"
+          print(r.stdout.strip())
+
+      - name: "Step F: unified console entry-point smoke"
+        shell: uv run --no-project python {0}
+        env:
+          FANTASY_FOOTBALL_MCP_HOME: ${{ runner.temp }}/ffm-home
+        run: |
+          import subprocess, os, time
+          from pathlib import Path
+          clean_venv = Path(os.environ["RUNNER_TEMP"]) / "ffm-cleanenv"
+          outside_cwd = Path(os.environ["RUNNER_TEMP"]) / "ffm-outside"
+          outside_cwd.mkdir(parents=True, exist_ok=True)
+          console = clean_venv / ("Scripts/fantasy-football-mcp.exe" if os.name == "nt" else "bin/fantasy-football-mcp")
+          assert console.exists(), f"console script not found at {console}"
+          proc = subprocess.Popen(
+              [str(console)], cwd=str(outside_cwd),
+              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+          )
+          time.sleep(3)
+          still_running = proc.poll() is None
+          proc.terminate()
+          try:
+              out, err = proc.communicate(timeout=5)
+          except subprocess.TimeoutExpired:
+              proc.kill()
+              out, err = proc.communicate()
+          assert still_running, "console entry point exited immediately (unexpected crash)"
+          assert out == b"", f"stdout was contaminated before any protocol traffic: {out!r}"
+          err_text = err.decode(errors="replace")
+          for marker in ("Traceback", "ModuleNotFoundError", "ImportError"):
+              assert marker not in err_text, f"stderr contained failure marker '{marker}':\n{err_text}"
+          print("unified console smoke OK - stdout empty, stderr free of failure markers")

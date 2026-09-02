@@ -1,0 +1,126 @@
+name: Publish Release
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    env:
+      TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Checkout validated main commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0
+
+      - name: Install uv + Python
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          python-version: "3.12"
+
+      - name: Read package version
+        id: version
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib
+          from pathlib import Path
+
+          data = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          print(f"version={data['project']['version']}")
+          PY
+
+      - name: Build release notes from changelog
+        id: notes
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          version = os.environ["VERSION"]
+          text = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          marker = f"## {version}"
+          start = text.find(marker)
+          if start < 0:
+              raise SystemExit(f"No changelog section found for {version}")
+          next_section = text.find("\n## ", start + len(marker))
+          section = text[start: next_section if next_section >= 0 else len(text)].strip()
+          Path("/tmp/release-notes.md").write_text(section + "\n", encoding="utf-8")
+          PY
+
+      - name: Inspect existing release
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -Eq '^fantasy_football_mcp-.*\.whl$'; then
+              echo "wheel_exists=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "wheel_exists=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "wheel_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout existing release tag for reproducible wheel
+        if: steps.release.outputs.exists == 'true' && steps.release.outputs.wheel_exists != 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: git checkout --detach "v${VERSION}"
+
+      - name: Build release wheel
+        if: steps.release.outputs.wheel_exists != 'true'
+        shell: bash
+        run: uv build --wheel --out-dir dist-release
+
+      - name: Publish GitHub release or attach missing wheel
+        if: steps.release.outputs.wheel_exists != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          TAG="v${VERSION}"
+          WHEEL=$(find dist-release -maxdepth 1 -type f -name '*.whl' -print -quit)
+          test -n "$WHEEL"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$WHEEL"
+            echo "Attached wheel to existing release $TAG."
+          else
+            gh release create "$TAG" "$WHEEL" \
+              --target "$TARGET_SHA" \
+              --title "ESPN Fantasy Football MCP $TAG" \
+              --notes-file /tmp/release-notes.md
+            echo "Published release $TAG."
+          fi
+
+      - name: Release already complete
+        if: steps.release.outputs.wheel_exists == 'true'
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: echo "Release v${VERSION} already has a wheel; nothing to publish."

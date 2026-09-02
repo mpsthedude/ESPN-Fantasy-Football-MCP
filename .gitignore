@@ -1,0 +1,43 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv/
+
+# Repo-local application home / personal configuration.
+# The normal app home is ~/.fantasy-football-mcp, but Quick Desktop and
+# development setups may point FANTASY_FOOTBALL_MCP_HOME inside the checkout.
+local_config/
+credentials.json
+league_registry.json
+commissioner_config.json
+
+# Generated draft/provider application state. Keep both current app-home
+# names and legacy dotted names ignored for compatibility with older checkouts.
+draft_strategy/
+fp_cache/
+sgo_cache/
+.draft_strategy/
+.fp_cache/
+.sgo_cache/
+
+# macOS Finder metadata
+.DS_Store
+
+# Ad-hoc timestamped source backups created during iterative development
+*.bak-*
+espn_fantasy_server.backup.py
+
+# Test runner cache and coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment/credential files
+.env
+*.env

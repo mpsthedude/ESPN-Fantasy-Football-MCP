@@ -1,0 +1,43 @@
+name: Cleanup Merged Branches
+
+on:
+  pull_request:
+    types:
+      - closed
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  cleanup:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Delete merged same-repository branches
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          gh api --paginate "/repos/${GITHUB_REPOSITORY}/pulls?state=closed&per_page=100" \
+            | jq -r --arg repo "$GITHUB_REPOSITORY" \
+                '.[] | select(.merged_at != null and .head.repo.full_name == $repo) | .head.ref' \
+            | sort -u \
+            | while IFS= read -r branch; do
+                [ -n "$branch" ] || continue
+                [ "$branch" != "main" ] || continue
+
+                if git ls-remote --exit-code --heads origin "refs/heads/$branch" >/dev/null 2>&1; then
+                  echo "Deleting merged branch: $branch"
+                  git push origin --delete "$branch"
+                fi
+              done

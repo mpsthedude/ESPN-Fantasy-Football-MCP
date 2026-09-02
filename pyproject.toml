@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fantasy-football-mcp"
+version = "0.4.1"
+description = "Local-first MCP server for ESPN Fantasy Football analysis with optional FantasyPros and sportsbook context"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+dependencies = [
+    "mcp[cli]>=1.7.0,<2",
+    "requests>=2.32.3",
+]
+
+[project.scripts]
+fantasy-football-mcp = "fantasy_football_server:main"
+
+[tool.hatch.build.targets.wheel]
+include = [
+    "LICENSE",
+    "fantasy_football_server.py",
+    "mcp_tool_annotations.py",
+    "espn_fantasy_server.py",
+    "espn_league_discovery.py",
+    "espn_transport.py",
+    "espn_reference.py",
+    "espn_session.py",
+    "espn_league_read.py",
+    "espn_roster_read.py",
+    "espn_matchup_read.py",
+    "espn_free_agent_read.py",
+    "espn_historical_lineup_read.py",
+    "espn_draft_read.py",
+    "espn_snapshot_read.py",
+    "espn_activity_read.py",
+    "app_config.py",
+    "fantasypros_client.py",
+    "fantasy_models.py",
+    "espn_adapter.py",
+    "league_registry.py",
+    "commissioner_config.py",
+    "draft_strategy_store.py",
+    "sportsgameodds_client.py",
+    "sportsgameodds_analysis.py",
+    "sportsgameodds_comparison.py",
+    "sportsgameodds_disagreement.py",
+    "sportsgameodds_disagreement_tools.py",
+    "sportsgameodds_tools.py",
+    "player_market_context.py",
+    "player_market_context_tools.py",
+]
