@@ -1,0 +1,81 @@
+name: Bug report
+description: Report a reproducible problem with ESPN Fantasy Football MCP
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+
+        NEVER paste ESPN cookies, SWIDs, API keys, credentials.json contents, or other secrets into this issue.
+
+        For security-sensitive reports, follow SECURITY.md instead of opening a public issue.
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      placeholder: "v0.4.1 or commit SHA"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - ESPN Fantasy Football
+        - ESPN authentication / league discovery
+        - FantasyPros
+        - SportsGameOdds
+        - Cross-provider player market context
+        - MCP host / protocol
+        - Installation / packaging
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: "Windows 11, Python 3.12, MCP host name"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs / evidence
+      description: Remove all cookies, API keys, account identifiers, and other secrets before posting.
+      render: text
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Credential safety
+      options:
+        - label: I have removed ESPN cookies, SWIDs, API keys, and other secrets from this report.
+          required: true

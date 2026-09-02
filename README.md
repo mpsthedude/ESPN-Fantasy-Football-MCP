@@ -209,6 +209,7 @@ See [SPORTSGAMEODDS.md](SPORTSGAMEODDS.md).
 - [Provenance](PROVENANCE.md) — historical origin and the clean-provenance boundary
 - [ESPN 2026 Audit Record](docs/ESPN_INTEGRATION_AUDIT_2026.md) — historical audit findings and closure status
 - [Changelog](CHANGELOG.md) — release and unreleased changes
+- [Contributing](CONTRIBUTING.md) - development workflow, contribution expectations, and PR checklist
 - [MIT License](LICENSE) — project license
 
 ## Development

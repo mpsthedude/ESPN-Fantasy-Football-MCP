@@ -1,0 +1,52 @@
+name: Feature request
+description: Suggest an improvement within the ESPN Fantasy Football MCP scope
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ESPN Fantasy Football is intentionally the only supported fantasy-league platform. FantasyPros and SportsGameOdds are supplemental providers.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Primary area
+      options:
+        - ESPN league data
+        - Team / roster analysis
+        - Waivers
+        - Trades
+        - Draft
+        - Commissioner workflows
+        - FantasyPros enrichment
+        - SportsGameOdds read-only market context
+        - Cross-provider context
+        - MCP / packaging
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope confirmation
+      options:
+        - label: This request does not require adding another fantasy-league platform such as Sleeper, Yahoo, or NFL.com.
+          required: true
+        - label: If sportsbook data is involved, the requested behavior remains read-only and does not execute wagers.
+          required: true
