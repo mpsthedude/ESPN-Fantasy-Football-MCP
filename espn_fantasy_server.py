@@ -26,7 +26,7 @@ from espn_roster_read import (ROSTER_VIEWS, COMMISSIONER_CURRENT_VIEWS, build_al
 from espn_matchup_read import (MATCHUP_CONTEXT_VIEWS, MATCHUP_SCORE_VIEWS, build_matchup_info, build_commissioner_matchup_evidence, resolve_matchup_request)
 from espn_free_agent_read import (FREE_AGENT_CONTEXT_VIEWS, FREE_AGENT_VIEWS, PRO_SCHEDULE_VIEWS, build_free_agent_filter, build_free_agents, resolve_free_agent_week)
 from espn_historical_lineup_read import (HISTORICAL_LINEUP_VIEWS, HISTORICAL_PRO_SCHEDULE_VIEWS, build_historical_lineup_boxes)
-from espn_draft_read import (DRAFT_PLAYER_FILTER, DRAFT_PLAYER_VIEWS, DRAFT_RESULT_VIEWS, build_draft_results)
+from espn_draft_read import (DRAFT_PLAYER_FILTER, DRAFT_PLAYER_VIEWS, DRAFT_RESULT_VIEWS, build_draft_results, build_live_player_pool, validate_live_snapshot, ESPNDraftPayloadError)
 from espn_snapshot_read import (SNAPSHOT_VIEWS, build_league_snapshot_base)
 from espn_activity_read import (ACTIVITY_VIEWS, ACTIVE_PLAYER_VIEWS, build_activity_filter, build_active_player_filter, build_active_player_name_map, build_activity_events)
 
@@ -7813,7 +7813,24 @@ def _fetch_raw_draft_state(league_id: int, year: int) -> dict:
     League state or its unsafe ``refresh_draft()`` mutation behavior.
     """
     transport = api.get_transport(SESSION_ID)
-    return transport.fetch_league(league_id, year, views=_DRAFT_STATE_VIEWS)
+    return validate_live_snapshot(transport.fetch_league(league_id, year, views=_DRAFT_STATE_VIEWS))
+
+def _fetch_live_draft_players(league_id: int, year: int, raw: dict) -> list:
+    """One bounded all-active-player read; never filter by carried roster status."""
+    scoring = _detect_league_scoring_bucket(build_league_settings(raw, league_id, year)["scoring_rules"])
+    payload = api.get_transport(SESSION_ID).fetch_league(
+        league_id, year, views=("kona_player_info",),
+        fantasy_filter={"players": {
+            "filterActive": {"value": True}, "limit": 2000,
+            "sortDraftRanks": {"sortPriority": 1, "sortAsc": True,
+                               "value": "PPR" if scoring == "PPR" else "STANDARD"},
+        }},
+    )
+    players = build_live_player_pool(payload, year)
+    if len(players) >= 2000:
+        raise ESPNDraftPayloadError("Draft player pool reached its limit; completeness cannot be verified")
+    return players
+
 
 def _dp_derive_draft_status(draft_detail: dict) -> str:
     """Deterministic status rule (documented, not guessed):
@@ -8098,33 +8115,20 @@ async def get_draft_board(alias: str = None, league_id: int = None, year: int = 
                 "players": players_out,
             })
 
-        # --- Available player pool (ESPN truth: free_agents, bounded,
+        # --- Active draft player pool (carried roster status is irrelevant,
         #     single call - never FantasyPros, never player_info fanout) ---
         drafted_or_keeper_ids = {p.get("playerId") for p in picks_raw if p.get("playerId", -1) not in (None, -1)}
         available_warnings = []
         enriched_available = []
         available_by_position = {}
         try:
-            fa_size = min(max(top_n * 3, 100), 400)
-            fa_context = _fetch_free_agent_context_payload(resolved_league_id, resolved_year)
-            fa_week = resolve_free_agent_week(fa_context, None)
-            fa_payload = _fetch_free_agent_player_payload(
-                resolved_league_id, resolved_year, fa_week, fa_size
-            )
-            fa_schedule = _fetch_pro_schedule_payload(resolved_year)
-            fa_rows = build_free_agents(
-                fa_payload, fa_schedule, resolved_year, fa_week, include_internal=True
-            )
-            fa_players = [SimpleNamespace(
-                playerId=p.get("_player_id"), name=p.get("name"),
-                position=p.get("position"), proTeam=p.get("proTeam"),
-                injuryStatus=p.get("_injury_status"),
-            ) for p in fa_rows]
+            fa_players = _fetch_live_draft_players(resolved_league_id, resolved_year, raw)
         except Exception as e:
-            fa_players = []
-            available_warnings.append(f"free_agent pool fetch failed: {type(e).__name__}")
+            return {"status": "error", "error": "draft_player_pool_unavailable",
+                    "message": "Could not verify the draft player universe. Retry the board request.",
+                    "detail": type(e).__name__}
 
-        scoring_rules = getattr(league.settings, "scoring_format", []) or []
+        scoring_rules = build_league_settings(raw, resolved_league_id, resolved_year)["scoring_rules"]
         scoring_bucket = _detect_league_scoring_bucket(scoring_rules)
         cache_warnings = _check_required_fp_caches(fp_client.CORE_POSITIONS, scoring_bucket)
 
@@ -8249,7 +8253,7 @@ async def get_draft_board(alias: str = None, league_id: int = None, year: int = 
                 "next_overall_pick": next_overall_pick,
                 "current_round": next_slot.get("roundId") if next_slot else None,
                 "current_round_pick": next_slot.get("roundPickNumber") if next_slot else None,
-                "team_on_clock": team_on_clock,
+                "team_on_clock": team_on_clock if draft_status == "in_progress" else None,
                 "time_per_selection_seconds": draft_settings.get("timePerSelection"),
                 "seconds_remaining": None, "seconds_remaining_status": "not_exposed",
                 "pause_state": "not_exposed",
@@ -8262,7 +8266,9 @@ async def get_draft_board(alias: str = None, league_id: int = None, year: int = 
             "picks": {"completed": [_dp_normalize_pick(p, pos_lookup) for p in completed_sorted],
                       "last_pick": last_pick, "recent": recent_picks},
             "teams": teams_builds,
+            "scoring_bucket": scoring_bucket,
             "available": {
+                "availability_status": "provisional_keeper_assignment" if identity_state in ("partial", "unknown_pre_deadline") else "confirmed_from_draft_picks",
                 "top_available": top_n,
                 "by_position_count": available_by_position,
                 "by_position_and_tier": available_by_position_and_tier,
@@ -8372,13 +8378,13 @@ def _ds_build_player_universe(position: str, scoring_bucket: str) -> tuple:
     universe.sort(key=lambda p: (p["projection"] is None, -(p["projection"] or 0)))
     return universe, warnings
 
-def _ds_starter_flex_allocation(slot_counts: dict, universes: dict) -> dict:
+def _ds_starter_flex_allocation(slot_counts: dict, universes: dict, team_count: int = 1) -> dict:
     """Deterministic league-specific starter+FLEX demand model (D2
     methodology, documented in full):
-    1. Dedicated demand per position = teams-wide dedicated slot count
-       (direct read from league.settings.position_slot_counts - never
-       hardcoded like '2 RB, 3 WR').
-    2. Remove the top `dedicated_demand[pos]` players (by projection)
+    1. ESPN position_slot_counts are per team. Multiply them by team_count
+       for league-wide replacement demand; keep per-team starter requirements
+       in the returned dedicated_demand for roster-fit callers.
+    2. Remove the top `dedicated_demand[pos] * team_count` players (by projection)
        from each position's own list - these are the dedicated starters.
     3. For each configured flex-style slot (RB/WR/TE, OP/SUPERFLEX,
        etc - via the frozen _parse_flex_eligibility parser), build the
@@ -8386,16 +8392,18 @@ def _ds_starter_flex_allocation(slot_counts: dict, universes: dict) -> dict:
        projected remaining players to fill that slot type's total
        league-wide demand (teams x count).
     4. Count how many of each position actually filled flex slots.
-    5. replacement_index[pos] = dedicated_demand[pos] + flex_filled[pos]
+    5. replacement_index[pos] = dedicated_demand[pos] * team_count + flex_filled[pos]
        - the boundary player at that index in position's own sorted
          list is the replacement-level player for VOR.
     Never assigns all FLEX demand to one arbitrary position."""
+    if type(team_count) is not int or team_count < 1:
+        raise ValueError("League team count is required for replacement levels")
     dedicated_demand = {pos: (slot_counts.get(pos) or 0) for pos in _DS_CORE_POSITIONS}
     flex_filled = {pos: 0 for pos in _DS_CORE_POSITIONS}
     assigned_names = {pos: set() for pos in _DS_CORE_POSITIONS}
 
     for pos in _DS_CORE_POSITIONS:
-        for p in universes.get(pos, [])[: dedicated_demand[pos]]:
+        for p in universes.get(pos, [])[: dedicated_demand[pos] * team_count]:
             if p.get("_norm_name"):
                 assigned_names[pos].add(p["_norm_name"])
 
@@ -8410,7 +8418,7 @@ def _ds_starter_flex_allocation(slot_counts: dict, universes: dict) -> dict:
 
     flex_fill_detail = []
     for slot_key, count, eligible in flex_defs:
-        total_demand = count  # already team-wide count from ESPN settings
+        total_demand = count * team_count  # ESPN slot counts are per team
         candidates = []
         for pos in eligible:
             for p in universes.get(pos, []):
@@ -8424,7 +8432,7 @@ def _ds_starter_flex_allocation(slot_counts: dict, universes: dict) -> dict:
         flex_fill_detail.append({"slot": slot_key, "team_wide_demand": total_demand,
                                    "filled_by_position": {pos: sum(1 for fp, _ in filled_this_slot if fp == pos) for pos in eligible}})
 
-    replacement_index = {pos: dedicated_demand[pos] + flex_filled[pos] for pos in _DS_CORE_POSITIONS}
+    replacement_index = {pos: dedicated_demand[pos] * team_count + flex_filled[pos] for pos in _DS_CORE_POSITIONS}
     return {"dedicated_demand": dedicated_demand, "flex_filled": flex_filled,
             "replacement_index": replacement_index, "flex_slot_detail": flex_fill_detail}
 
@@ -8707,7 +8715,7 @@ def _ds_build_structural_fingerprint(structural_inputs: dict) -> str:
     canonical = json.dumps(structural_inputs, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
-_DS_METHODOLOGY_VERSION = 1
+_DS_METHODOLOGY_VERSION = 2
 
 @mcp.tool()
 async def prepare_draft_strategy(alias: str = None, league_id: int = None, year: int = None,
@@ -8840,7 +8848,7 @@ async def prepare_draft_strategy(alias: str = None, league_id: int = None, year:
                 if nm:
                     unavailable_norm_names.add(fp_client.normalize_player_name(nm))
 
-        scoring_rules = getattr(league.settings, "scoring_format", []) or []
+        scoring_rules = build_league_settings(raw, resolved_league_id, resolved_year)["scoring_rules"]
         scoring_bucket = _detect_league_scoring_bucket(scoring_rules)
         slot_counts = getattr(league.settings, "position_slot_counts", {}) or {}
         team_count = getattr(league.settings, "team_count", None)
@@ -8861,7 +8869,7 @@ async def prepare_draft_strategy(alias: str = None, league_id: int = None, year:
         injuries_cache_meta = fp_client.get_injuries_cache()
         fp_dataset_meta["injuries"] = (injuries_cache_meta or {}).get("fetched_at")
 
-        allocation = _ds_starter_flex_allocation(slot_counts, universes)
+        allocation = _ds_starter_flex_allocation(slot_counts, universes, team_count)
         replacement_by_position = _ds_apply_replacement_and_vor(universes, allocation["replacement_index"])
         tier_board = _ds_build_tier_board(universes)
         position_guidance = [_ds_position_guidance(pos, universes[pos], replacement_by_position[pos], allocation["dedicated_demand"])
@@ -9056,7 +9064,7 @@ def _adp_decision_pick_context(my_picks_all: list, unresolved: list) -> dict:
     next_user_open_pick = next_open["overall_pick"] if next_open else None
     turn_span = (next_user_open_pick - decision_pick) if next_user_open_pick else None
     picks_until_decision = sum(1 for p in unresolved if p.get("overallPickNumber") is not None
-                                 and p.get("overallPickNumber") < decision_pick)
+                                 and p.get("overallPickNumber") < decision_pick and not p.get("reservedForKeeper"))
     return {"decision_pick": decision_pick, "user_on_clock": picks_until_decision == 0,
             "picks_until_decision": picks_until_decision, "next_user_open_pick": next_user_open_pick,
             "turn_span": turn_span, "status": "ok"}
@@ -9807,7 +9815,7 @@ async def analyze_draft_pick(alias: str = None, league_id: int = None, year: int
 
         draft_order = _dp_build_draft_order(picks_raw)
         authenticated_swid = api.credentials.get(SESSION_ID, {}).get("swid")
-        my_team = _resolve_my_team(league, authenticated_swid)
+        my_team = resolve_my_team_from_payload(raw, authenticated_swid)
         my_team_id = my_team.get("team_id")
         if my_team_id is None:
             return {"status": "error", "error": "my_team_unresolved", "message": my_team.get("status")}
@@ -9823,7 +9831,7 @@ async def analyze_draft_pick(alias: str = None, league_id: int = None, year: int
 
         settings = league.settings
         slot_counts = getattr(settings, "position_slot_counts", {}) or {}
-        scoring_rules = getattr(settings, "scoring_format", []) or []
+        scoring_rules = build_league_settings(raw, resolved_league_id, resolved_year)["scoring_rules"]
         scoring_bucket = _detect_league_scoring_bucket(scoring_rules)
         team_count = getattr(settings, "team_count", None)
 
@@ -9840,7 +9848,7 @@ async def analyze_draft_pick(alias: str = None, league_id: int = None, year: int
         injuries_cache_meta = fp_client.get_injuries_cache()
         fp_dataset_meta["injuries"] = (injuries_cache_meta or {}).get("fetched_at")
 
-        allocation = _ds_starter_flex_allocation(slot_counts, universes)
+        allocation = _ds_starter_flex_allocation(slot_counts, universes, team_count)
         replacement_by_position = _ds_apply_replacement_and_vor(universes, allocation["replacement_index"])
         tier_board = _ds_build_tier_board(universes)
         position_guidance = {pos: _ds_position_guidance(pos, universes[pos], replacement_by_position[pos], allocation["dedicated_demand"])
@@ -9874,10 +9882,19 @@ async def analyze_draft_pick(alias: str = None, league_id: int = None, year: int
 
         drafted_or_keeper_ids = {p.get("playerId") for p in picks_raw if p.get("playerId", -1) not in (None, -1)}
         try:
-            fa_size = min(max(top_n_val * 20, 200), 400)
-            fa_players = league.free_agents(size=fa_size)
+            fa_players = _fetch_live_draft_players(resolved_league_id, resolved_year, raw)
         except Exception as e:
-            fa_players = []
+            return {"status": "error", "error": "draft_player_pool_unavailable",
+                    "message": "Could not verify draft candidates. Retry before choosing a player.",
+                    "detail": type(e).__name__}
+        try:
+            final_raw = validate_live_snapshot(_fetch_raw_draft_state(resolved_league_id, resolved_year), raw)
+        except Exception:
+            return {"status": "error", "error": "draft_revalidation_failed",
+                    "message": "Could not confirm the final board. Retry before choosing a player."}
+        if final_raw["draftDetail"] != raw["draftDetail"]:
+            return {"status": "error", "error": "draft_board_changed_retry",
+                    "message": "The draft changed during this comparison. Retry for current candidates."}
         espn_pool = [p for p in fa_players if getattr(p, "playerId", None) not in drafted_or_keeper_ids]
         espn_pool_by_id, espn_pool_by_norm_name = {}, {}
         for p in espn_pool:
@@ -10039,13 +10056,17 @@ async def analyze_draft_pick(alias: str = None, league_id: int = None, year: int
             warnings_out.append("roster_completion_at_risk: no currently available player preserves a legal "
                                   "final roster for at least one mandatory position.")
 
+        if recommendation and keeper_identity_state in ("partial", "unknown_pre_deadline"):
+            recommendation["recommendation_confidence"] = "low"
         return {
             "status": "ok",
+            "availability_status": "provisional_keeper_assignment" if keeper_identity_state in ("partial", "unknown_pre_deadline") else "confirmed_from_draft_picks",
+            "scoring_bucket": scoring_bucket,
             "roster_feasibility": roster_feasibility_ctx,
             "league": {"league_id": resolved_league_id, "alias": resolved_alias, "year": resolved_year},
             "draft_context": {"draft_status": draft_status, "current_overall_pick": current_overall_pick,
-                                 "team_on_clock": team_on_clock, "decision_pick": decision_pick,
-                                 "user_on_clock": decision_ctx["user_on_clock"],
+                                 "team_on_clock": team_on_clock if draft_status == "in_progress" else None, "decision_pick": decision_pick,
+                                 "user_on_clock": draft_status == "in_progress" and decision_ctx["user_on_clock"],
                                  "picks_until_decision": decision_ctx["picks_until_decision"],
                                  "next_user_open_pick": next_user_open_pick, "turn_span": decision_ctx["turn_span"]},
             "strategy_context": {"status": strategy_compat["status"],
@@ -10141,7 +10162,7 @@ async def _adp_core_analysis(alias, league_id, year, top_n_val):
 
     draft_order = _dp_build_draft_order(picks_raw)
     authenticated_swid = api.credentials.get(SESSION_ID, {}).get("swid")
-    my_team = _resolve_my_team(league, authenticated_swid)
+    my_team = resolve_my_team_from_payload(raw, authenticated_swid)
     my_team_id = my_team.get("team_id")
     if my_team_id is None:
         return {"early_exit": True, "payload": {"status": "error", "error": "my_team_unresolved",
@@ -10160,7 +10181,7 @@ async def _adp_core_analysis(alias, league_id, year, top_n_val):
 
     settings = league.settings
     slot_counts = getattr(settings, "position_slot_counts", {}) or {}
-    scoring_rules = getattr(settings, "scoring_format", []) or []
+    scoring_rules = build_league_settings(raw, resolved_league_id, resolved_year)["scoring_rules"]
     scoring_bucket = _detect_league_scoring_bucket(scoring_rules)
     team_count = getattr(settings, "team_count", None)
 
@@ -10177,7 +10198,7 @@ async def _adp_core_analysis(alias, league_id, year, top_n_val):
     injuries_cache_meta = fp_client.get_injuries_cache()
     fp_dataset_meta["injuries"] = (injuries_cache_meta or {}).get("fetched_at")
 
-    allocation = _ds_starter_flex_allocation(slot_counts, universes)
+    allocation = _ds_starter_flex_allocation(slot_counts, universes, team_count)
     replacement_by_position = _ds_apply_replacement_and_vor(universes, allocation["replacement_index"])
     tier_board = _ds_build_tier_board(universes)
     position_guidance = {pos: _ds_position_guidance(pos, universes[pos], replacement_by_position[pos], allocation["dedicated_demand"])
@@ -10212,14 +10233,16 @@ async def _adp_core_analysis(alias, league_id, year, top_n_val):
     initial_state_hash = _dp_state_hash(resolved_league_id, resolved_year, picks_raw)
 
     try:
-        fa_size = min(max(top_n_val * 20, 200), 400)
-        fa_players = league.free_agents(size=fa_size)
-    except Exception:
-        fa_players = []
+        fa_players = _fetch_live_draft_players(resolved_league_id, resolved_year, raw)
+    except Exception as e:
+        return {"early_exit": True, "payload": {
+            "status": "error", "error": "draft_player_pool_unavailable",
+            "message": "Could not verify draft candidates. Retry before choosing a player.",
+            "detail": type(e).__name__}}
 
     # D11C: second fresh draft-state GET after free-agent request
     try:
-        raw2 = _fetch_raw_draft_state(league.league_id, league.year)
+        raw2 = validate_live_snapshot(_fetch_raw_draft_state(league.league_id, league.year), raw)
     except Exception as _d11c_err:
         return {"early_exit": True, "payload": {
             "status": "error", "error": "draft_revalidation_failed",
@@ -10231,9 +10254,15 @@ async def _adp_core_analysis(alias, league_id, year, top_n_val):
 
     # D11C: rederive all draft-state inputs from final state
     draft_detail_2 = raw2.get("draftDetail", {})
-    picks_raw_2 = draft_detail_2.get("picks", []) or picks_raw
-    raw_teams_2 = raw2.get("teams", []) or raw_teams
-    pos_lookup_2 = _dp_build_position_lookup(raw_teams_2, resolved_year)
+    draft_status = _dp_derive_draft_status(draft_detail_2)
+    if draft_status == "complete":
+        return {"early_exit": True, "payload": {"status": "ok", "draft_status": "complete",
+                "message": "draft_already_complete"}}
+    picks_raw_2 = draft_detail_2["picks"]
+    raw_teams_2 = raw2["teams"]
+    pos_lookup_2 = {p.playerId: {"name": p.name, "position": p.position,
+                       "proTeam": p.proTeam, "injury_status": p.injuryStatus} for p in fa_players}
+    pos_lookup_2.update(_dp_build_position_lookup(raw_teams_2, resolved_year))
 
     picks_sorted_2 = sorted(picks_raw_2, key=lambda p: (p.get("overallPickNumber") if p.get("overallPickNumber") is not None else 10**9))
     unresolved_2 = [p for p in picks_sorted_2 if p.get("playerId", -1) in (None, -1)]
@@ -10241,6 +10270,12 @@ async def _adp_core_analysis(alias, league_id, year, top_n_val):
 
     final_state_hash = _dp_state_hash(resolved_league_id, resolved_year, picks_raw_2)
     board_advanced_during_call = (initial_state_hash != final_state_hash)
+
+    old_keepers = [p for p in picks_raw if p.get("reservedForKeeper")]
+    new_keepers = [p for p in picks_raw_2 if p.get("reservedForKeeper")]
+    if old_keepers != new_keepers:
+        return {"early_exit": True, "payload": {"status": "error", "error": "keeper_state_changed_retry",
+                "message": "Keeper assignments changed during this request. Retry for updated strategy context."}}
 
     # Rebind authoritative names to state_2
     picks_raw = picks_raw_2
@@ -10407,8 +10442,8 @@ async def _adp_core_analysis(alias, league_id, year, top_n_val):
         "early_exit": False,
         "roster_feasibility": roster_feasibility_ctx,
         "resolved_league_id": resolved_league_id, "resolved_year": resolved_year, "resolved_alias": resolved_alias,
-        "league": league, "draft_status": draft_status, "current_overall_pick": current_overall_pick,
-        "team_on_clock": team_on_clock, "decision_pick": decision_pick, "user_on_clock": decision_ctx["user_on_clock"],
+        "league": league, "scoring_bucket": scoring_bucket, "draft_status": draft_status, "current_overall_pick": current_overall_pick,
+        "team_on_clock": team_on_clock if draft_status == "in_progress" else None, "decision_pick": decision_pick, "user_on_clock": draft_status == "in_progress" and decision_ctx["user_on_clock"],
         "picks_until_decision": decision_ctx["picks_until_decision"], "next_user_open_pick": next_user_open_pick,
         "turn_span": decision_ctx["turn_span"], "strategy_compat": strategy_compat, "saved_strategy": saved_strategy,
         "keeper_identity_state": keeper_identity_state, "my_drafted_counts": my_drafted_counts,
@@ -10710,12 +10745,19 @@ async def get_live_draft_brief(alias: str = None, league_id: int = None, year: i
 
         limitations_full = [
             "ESPN's remaining pick-clock timer is not exposed and is not estimated here.",
+            "FantasyPros scoring-bucket projections do not fully model custom rules such as six-point passing touchdowns.",
             "Survival estimates are categorical (very_likely..very_unlikely), not calibrated probabilities.",
             "K/DST are excluded from the default recommendation pool - no equivalent FantasyPros analysis exists.",
         ]
         limitations_out = limitations_full[:_GLDB_MAX_LIMITATIONS]
 
         summary = _gldb_build_summary_sentence(headline, rec_out, why_now, alternatives)
+        if core["keeper_identity_state"] in ("partial", "unknown_pre_deadline"):
+            summary = "Provisional until ESPN assigns all keepers. " + summary
+            if rec_out:
+                rec_out["confidence"] = "low"
+        elif core["draft_status"] == "pre_draft":
+            summary = "Pre-draft preview. " + summary
 
         return {
             "status": "ok",
@@ -10733,6 +10775,9 @@ async def get_live_draft_brief(alias: str = None, league_id: int = None, year: i
             "warnings": warnings_out,
             "warnings_truncated": warnings_truncated,
             "data_limitations": limitations_out,
+            "availability_status": ("provisional_keeper_assignment" if core["keeper_identity_state"] in ("partial", "unknown_pre_deadline") else "confirmed_from_draft_picks"),
+            "scoring_bucket": core["scoring_bucket"],
+            "data_freshness": core["data_freshness"],
             "methodology": {"recommendation_source": "D3 analyze_draft_pick methodology (identical, unmodified)",
                               "board_source": "fresh ESPN raw draft state", "strategy_source": "saved D2/D2.1 strategy",
                               "fantasypros": "cache_only"},

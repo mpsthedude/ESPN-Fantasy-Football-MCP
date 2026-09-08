@@ -4,6 +4,20 @@ All notable shared releases and unreleased `main` changes for `fantasy-football-
 
 ## Unreleased
 
+### Fixed
+
+- Restored draft recommendation team resolution and scoring-bucket detection after the project-owned ESPN transport migration.
+- Replaced removed `League.free_agents` calls with a bounded active-player draft query. Carried-over roster status no longer silently excludes draft candidates, and player-pool failures return explicit errors.
+- Revalidated live recommendations against the final draft snapshot, including picks that advance before roster updates and drafts that complete during a request. Incomplete final snapshots fail instead of reusing earlier state; changed keeper assignments and changed comparison boards request a retry.
+- Accounted for league team count when computing replacement-level player value. Draft strategy methodology is now version 2; rebuild strategies saved with the earlier methodology.
+- Marked pending keeper assignments as provisional, lowered recommendation confidence in that state, excluded reserved keeper slots from the count of selections before a decision, and stopped reporting an on-clock team before the draft starts.
+
+### Added
+
+- Exposed scoring bucket and availability status on the factual draft board and recommendation responses, plus cache freshness in the live brief.
+- Added offline regression coverage for draft ownership, PPR, candidate parsing, positional scarcity, snapshot changes, completion, and provider failures.
+- Added a [live-draft setup guide](docs/LIVE_DRAFT.md) covering application-home configuration, cache preparation, snapshot semantics, and remaining provider limitations.
+
 ## 0.4.1 — 2026-09-02
 
 Public-launch patch release. Runtime behavior and the 52-tool MCP surface are unchanged from `0.4.0`.

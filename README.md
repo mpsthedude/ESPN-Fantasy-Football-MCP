@@ -11,6 +11,7 @@ The current production implementation is project-owned. ESPN transport, authenti
 ## Capabilities
 
 - ESPN league, settings, standings, rosters, matchups, players, waivers, trades, draft, and commissioner analysis
+- Live draft recommendations with final-board revalidation, league-specific scoring, and explicit keeper uncertainty; see [Live Draft Setup](docs/LIVE_DRAFT.md).
 - Server-side ESPN authentication with optional explicit in-memory override
 - ESPN account league discovery and preview-first registry synchronization
 - FantasyPros rankings, ADP, player intelligence, projections, news, injuries, and ESPN free-agent enrichment
