@@ -1,17 +1,15 @@
-"""Project-owned parsing for completed ESPN fantasy draft results.
+"""Project-owned parsing and validation for ESPN completed and live drafts.
 
-This module intentionally covers only the factual completed-draft surface used
-by get_draft_results. Live draft-board/recommendation behavior remains a
-separate contract and is not migrated here.
-
-ESPN's Fantasy endpoints are undocumented. Keep these field mappings covered
-by deterministic fixture-style tests and change them deliberately when ESPN
-changes its payload.
+ESPN's Fantasy endpoints are undocumented. Keep the observed field contracts
+covered with deterministic tests and validate against live reads deliberately.
 """
 
 from __future__ import annotations
 
 from typing import Any
+from types import SimpleNamespace
+
+from espn_roster_read import parse_roster_entry
 
 
 DRAFT_RESULT_VIEWS = ("mDraftDetail", "mTeam")
@@ -21,6 +19,63 @@ DRAFT_PLAYER_FILTER = {"filterActive": {"value": True}}
 
 class ESPNDraftPayloadError(ValueError):
     """The ESPN response did not contain the expected draft-result shape."""
+
+
+def validate_live_snapshot(payload: Any, previous: dict | None = None) -> dict:
+    """Reject incomplete snapshots instead of presenting an older board as fresh."""
+    if not isinstance(payload, dict):
+        raise ESPNDraftPayloadError("Missing live draft payload")
+    detail = payload.get("draftDetail")
+    if not isinstance(detail, dict) or any(type(detail.get(k)) is not bool for k in ("drafted", "inProgress")):
+        raise ESPNDraftPayloadError("Missing live draft status")
+    picks = detail.get("picks")
+    teams = payload.get("teams")
+    if not isinstance(picks, list) or not picks or not isinstance(teams, list) or not teams:
+        raise ESPNDraftPayloadError("Missing live draft picks or teams")
+    slots = set()
+    for pick in picks:
+        if not isinstance(pick, dict) or any(type(pick.get(k)) is not int for k in ("overallPickNumber", "teamId", "roundId", "roundPickNumber")):
+            raise ESPNDraftPayloadError("Invalid live draft slot")
+        if pick["overallPickNumber"] in slots:
+            raise ESPNDraftPayloadError("Duplicate live draft slot")
+        slots.add(pick["overallPickNumber"])
+    if previous is not None:
+        old_slots = {p["overallPickNumber"] for p in previous["draftDetail"]["picks"]}
+        if slots != old_slots:
+            raise ESPNDraftPayloadError("Draft skeleton changed during the request; retry")
+        if payload.get("settings") != previous.get("settings"):
+            raise ESPNDraftPayloadError("League settings changed during the request; retry")
+        if {t.get("id") for t in teams} != {t.get("id") for t in previous["teams"]}:
+            raise ESPNDraftPayloadError("Incomplete team snapshot; retry")
+    return payload
+
+
+def build_live_player_pool(payload: Any, year: int) -> list:
+    """Parse all active draft candidates, independent of carried roster status.
+
+    Availability is determined separately from the latest draft picks. Before
+    keeper assignment this universe is explicitly provisional.
+    """
+    entries = payload.get("players") if isinstance(payload, dict) else None
+    if not isinstance(entries, list) or not entries:
+        raise ESPNDraftPayloadError("Missing draft player pool")
+    players = []
+    seen = set()
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("player"), dict):
+            raise ESPNDraftPayloadError("Invalid draft player entry")
+        player = entry["player"]
+        pid = player.get("id")
+        if type(pid) is not int or not player.get("fullName") or pid in seen:
+            raise ESPNDraftPayloadError("Invalid or duplicate draft player identity")
+        seen.add(pid)
+        parsed = parse_roster_entry({"playerPoolEntry": entry}, year)
+        players.append(SimpleNamespace(
+            playerId=pid, name=parsed["name"], position=parsed["position"],
+            proTeam=parsed["proTeam"], injuryStatus=parsed["injury_status"],
+            stats=parsed["stats"],
+        ))
+    return players
 
 
 def _require_dict(payload: Any, label: str) -> dict:

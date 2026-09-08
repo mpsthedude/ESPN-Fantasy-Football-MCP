@@ -124,6 +124,16 @@ FantasyPros credentials are resolved server-side. These tools never require an A
 
 `get_draft_board` is the factual source. Persisted strategy is advisory methodology. Live recommendation tools re-read/revalidate authoritative state rather than treating the saved strategy artifact as the board.
 
+Draft player reads query up to 2,000 active players without filtering by carried-over roster status. Assigned draft picks and keeper IDs exclude candidates. A missing, malformed, or limit-sized pool returns an explicit error instead of an empty recommendation pool. This query is separate from ordinary waiver/free-agent reads.
+
+`get_live_draft_brief` fetches the board, reads candidates, and then fetches the board again. It excludes players selected during the call even if their new roster entries have not propagated yet. Draft completion produces no recommendation. Missing or partial revalidation data produces `draft_revalidation_failed`; changed keeper assignments produce `keeper_state_changed_retry`. `analyze_draft_pick` returns `draft_board_changed_retry` when its board changes during the comparison. Retry these calls before choosing a player.
+
+The board exposes `scoring_bucket` and `available.availability_status`. Recommendation responses expose `scoring_bucket` and `availability_status`; the brief also exposes `data_freshness`. Availability is `provisional_keeper_assignment` while keeper identities are pending, otherwise `confirmed_from_draft_picks`. Provisional recommendation confidence is low. This is snapshot-based availability, not a guarantee that a player remains available after the response.
+
+Draft strategy methodology version 2 computes replacement levels using all league teams while retaining per-team starter requirements for roster fit. Rebuild older strategies with `prepare_draft_strategy`.
+
+See [Live Draft Setup](LIVE_DRAFT.md) for preparation and limitations, including the unavailable countdown/pause state, scoring-bucket projection limits, and validation against an in-progress draft room.
+
 ## Commissioner — 6
 
 | Tool | Purpose |
